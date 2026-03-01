@@ -7,10 +7,12 @@ import com.steelextractor.SteelExtractor
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.server.MinecraftServer
 import net.minecraft.world.item.BlockItem
+import net.minecraft.world.item.BucketItem
 import net.minecraft.world.item.StandingAndWallBlockItem
 import net.minecraft.world.level.block.Block
 import net.minecraft.world.level.block.ButtonBlock
 import net.minecraft.world.level.block.LiquidBlock
+import net.minecraft.world.level.material.Fluid
 import org.slf4j.LoggerFactory
 
 class Classes : SteelExtractor.Extractor {
@@ -75,6 +77,14 @@ class Classes : SteelExtractor.Extractor {
                 itemJson.addProperty(
                     "wallBlock",
                     BuiltInRegistries.BLOCK.getKey(item.javaClass.getField("wallBlock").get(item) as Block)?.path
+                )
+            }
+            if (item is BucketItem) {
+                var fluidField = BucketItem::class.java.getDeclaredField("content")
+                fluidField.isAccessible = true
+                itemJson.addProperty(
+                    "fluid",
+                    BuiltInRegistries.FLUID.getKey(fluidField.get(item) as Fluid)?.path
                 )
             }
 
