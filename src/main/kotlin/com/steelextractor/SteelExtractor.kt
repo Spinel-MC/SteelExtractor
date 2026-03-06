@@ -26,6 +26,7 @@ import net.minecraft.world.level.chunk.status.ChunkStatus
 import com.steelextractor.extractors.Potions
 import com.steelextractor.extractors.StructureStarts
 import com.steelextractor.extractors.Tags
+import com.steelextractor.extractors.Waxables
 import kotlinx.io.IOException
 import net.fabricmc.api.ModInitializer
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
@@ -74,7 +75,8 @@ object SteelExtractor : ModInitializer {
             BiomeHashes(),
             LevelEvents(),
             Tags(),
-            StructureStarts()
+            StructureStarts(),
+            Waxables()
         )
 
         val chunkStageExtractor = ChunkStageHashes()
