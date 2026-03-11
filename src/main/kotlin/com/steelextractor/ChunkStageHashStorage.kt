@@ -7,8 +7,14 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
+data class BlockHashResult(
+    val hash: String,
+    val sectionData: List<IntArray?>
+)
+
 object ChunkStageHashStorage {
     private val hashes = ConcurrentHashMap<Pair<ChunkPos, String>, String>()
+    private val blockData = ConcurrentHashMap<Pair<ChunkPos, String>, List<IntArray?>>()
     private val trackedChunks = ConcurrentHashMap.newKeySet<ChunkPos>()
     private val readyChunks = ConcurrentHashMap.newKeySet<ChunkPos>()
 
@@ -40,8 +46,16 @@ object ChunkStageHashStorage {
         hashes[Pair(pos, stageName)] = hash
     }
 
+    fun storeBlockData(pos: ChunkPos, stageName: String, data: List<IntArray?>) {
+        blockData[Pair(pos, stageName)] = data
+    }
+
     fun getAllHashes(): Map<Pair<ChunkPos, String>, String> {
         return hashes.toMap()
+    }
+
+    fun getAllBlockData(): Map<Pair<ChunkPos, String>, List<IntArray?>> {
+        return blockData.toMap()
     }
 
     fun getReadyCount(): Int = readyChunks.size
@@ -49,24 +63,31 @@ object ChunkStageHashStorage {
 
     fun clear() {
         hashes.clear()
+        blockData.clear()
         trackedChunks.clear()
         readyChunks.clear()
         readyLatch = null
     }
 
-    fun computeBlockHash(sections: Iterable<net.minecraft.world.level.chunk.LevelChunkSection>): String {
+    fun computeBlockHashWithData(sections: Iterable<net.minecraft.world.level.chunk.LevelChunkSection>): BlockHashResult {
         val md = MessageDigest.getInstance("MD5")
+        val sectionDataList = mutableListOf<IntArray?>()
 
         for (section in sections) {
             if (section.hasOnlyAir()) {
                 md.update(0.toByte())
+                sectionDataList.add(null)
             } else {
+                val stateIds = IntArray(4096)
+                var idx = 0
                 val states = section.states
                 for (y in 0 until 16) {
                     for (z in 0 until 16) {
                         for (x in 0 until 16) {
                             val state = states.get(x, y, z)
                             val stateId = net.minecraft.world.level.block.Block.getId(state)
+                            stateIds[idx] = stateId
+                            idx++
                             md.update((stateId shr 24).toByte())
                             md.update((stateId shr 16).toByte())
                             md.update((stateId shr 8).toByte())
@@ -74,9 +95,11 @@ object ChunkStageHashStorage {
                         }
                     }
                 }
+                sectionDataList.add(stateIds)
             }
         }
 
-        return md.digest().joinToString("") { "%02x".format(it) }
+        val hash = md.digest().joinToString("") { "%02x".format(it) }
+        return BlockHashResult(hash, sectionDataList)
     }
 }

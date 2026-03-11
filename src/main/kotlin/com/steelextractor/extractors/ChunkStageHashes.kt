@@ -7,6 +7,10 @@ import com.steelextractor.ChunkStageHashStorage
 import com.steelextractor.SteelExtractor
 import net.minecraft.server.MinecraftServer
 import org.slf4j.LoggerFactory
+import java.io.DataOutputStream
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.zip.GZIPOutputStream
 
 class ChunkStageHashes : SteelExtractor.Extractor {
     private val logger = LoggerFactory.getLogger("steel-extractor-chunk-stage-hashes")
@@ -50,5 +54,63 @@ class ChunkStageHashes : SteelExtractor.Extractor {
 
         logger.info("Extracted chunk stage hashes for ${chunkGroups.size} chunks")
         return json
+    }
+
+    /**
+     * Write per-stage gzip-compressed binary files containing raw block state IDs.
+     *
+     * Format (all integers big-endian):
+     *   chunk_count: i32
+     *   For each chunk (sorted by x, z):
+     *     chunk_x: i32
+     *     chunk_z: i32
+     *     section_count: i32
+     *     For each section (bottom to top):
+     *       has_data: u8 (0 = all air, 1 = has block data)
+     *       if has_data == 1:
+     *         state_ids: [i32; 4096] in YZX order
+     */
+    fun writeBinaryBlockData(outputDir: Path) {
+        val allData = ChunkStageHashStorage.getAllBlockData()
+        if (allData.isEmpty()) {
+            logger.warn("No block data stored, skipping binary output")
+            return
+        }
+
+        val stageGroups = allData.entries.groupBy { it.key.second }
+
+        for ((stageName, entries) in stageGroups) {
+            val shortName = stageName.removePrefix("minecraft:")
+            val fileName = "chunk_stage_${shortName}_blocks.bin.gz"
+            val outputPath = outputDir.resolve("steel-core/test_assets/$fileName")
+            Files.createDirectories(outputPath.parent)
+
+            val chunksByPos = entries
+                .map { it.key.first to it.value }
+                .sortedWith(compareBy({ it.first.x }, { it.first.z }))
+
+            GZIPOutputStream(Files.newOutputStream(outputPath)).use { gzip ->
+                DataOutputStream(gzip).use { dos ->
+                    dos.writeInt(chunksByPos.size)
+                    for ((pos, sectionData) in chunksByPos) {
+                        dos.writeInt(pos.x)
+                        dos.writeInt(pos.z)
+                        dos.writeInt(sectionData.size)
+                        for (section in sectionData) {
+                            if (section == null) {
+                                dos.writeByte(0)
+                            } else {
+                                dos.writeByte(1)
+                                for (stateId in section) {
+                                    dos.writeInt(stateId)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            logger.info("Wrote binary block data for stage '$stageName': ${chunksByPos.size} chunks -> $outputPath")
+        }
     }
 }

@@ -44,7 +44,10 @@ import kotlin.system.measureTimeMillis
 
 object SteelExtractor : ModInitializer {
     private val logger = LoggerFactory.getLogger("steel-extractor")
-    private const val HALF_SIZE = 10
+    private const val HALF_SIZE = 25
+
+    /** Set to false to skip chunk generation and chunk stage hash extraction. */
+    private const val ENABLE_CHUNK_EXTRACTION = true
 
     override fun onInitialize() {
         logger.info("Hello Fabric world!")
@@ -80,17 +83,22 @@ object SteelExtractor : ModInitializer {
             PoiTypesExtractor()
         )
 
+
         val chunkStageExtractor = ChunkStageHashes()
 
-        ServerLifecycleEvents.SERVER_STARTING.register { _ ->
-            logger.info("Setting up chunk stage hash tracking (${HALF_SIZE * 2}x${HALF_SIZE * 2} chunks)")
-            val chunksToTrack = mutableSetOf<ChunkPos>()
-            for (x in -HALF_SIZE until HALF_SIZE) {
-                for (z in -HALF_SIZE until HALF_SIZE) {
-                    chunksToTrack.add(ChunkPos(x, z))
+        if (ENABLE_CHUNK_EXTRACTION) {
+            ServerLifecycleEvents.SERVER_STARTING.register { _ ->
+                logger.info("Setting up chunk stage hash tracking (${HALF_SIZE * 2}x${HALF_SIZE * 2} chunks)")
+                val chunksToTrack = mutableSetOf<ChunkPos>()
+                for (x in -HALF_SIZE until HALF_SIZE) {
+                    for (z in -HALF_SIZE until HALF_SIZE) {
+                        chunksToTrack.add(ChunkPos(x, z))
+                    }
                 }
+                ChunkStageHashStorage.startTracking(chunksToTrack)
             }
-            ChunkStageHashStorage.startTracking(chunksToTrack)
+        } else {
+            logger.info("Chunk extraction DISABLED")
         }
 
         val outputDirectory: Path
@@ -106,57 +114,79 @@ object SteelExtractor : ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(ServerLifecycleEvents.ServerStarted { server: MinecraftServer ->
             val timeInMillis = measureTimeMillis {
                 for (ext in immediateExtractors) {
-                    try {
-                        val out = outputDirectory.resolve(ext.fileName())
-                        Files.createDirectories(out.parent)
-                        val fileWriter = FileWriter(out.toFile(), StandardCharsets.UTF_8)
-                        gson.toJson(ext.extract(server), fileWriter)
-                        fileWriter.close()
-                        logger.info("Wrote " + out.toAbsolutePath())
-                    } catch (e: java.lang.Exception) {
-                        logger.error(("Extractor for \"" + ext.fileName()) + "\" failed.", e)
-                    }
+                    runExtractor(ext, outputDirectory, gson, server)
                 }
             }
             logger.info("Immediate extractors done, took ${timeInMillis}ms")
-            logger.info("Forcing generation of ${HALF_SIZE * 2 * HALF_SIZE * 2} chunks...")
 
-            // Only generate overworld chunks for hash comparison
-            val overworld = server.overworld()
-            for (x in -HALF_SIZE until HALF_SIZE) {
-                for (z in -HALF_SIZE until HALF_SIZE) {
-                    overworld.getChunk(x, z, ChunkStatus.FULL, true)
-                }
-            }
 
-            // Mark any chunks that were loaded from disk (not freshly generated)
-            // as ready, since the mixin only fires during generation.
-            var manuallyMarked = 0
-            for (x in -HALF_SIZE until HALF_SIZE) {
-                for (z in -HALF_SIZE until HALF_SIZE) {
-                    val pos = ChunkPos(x, z)
-                    if (ChunkStageHashStorage.markReady(pos)) {
-                        manuallyMarked++
-                    }
-                }
+            if (!ENABLE_CHUNK_EXTRACTION) {
+                logger.info("All extractors complete! (chunk extraction skipped)")
             }
-            if (manuallyMarked > 0) {
-                logger.warn("$manuallyMarked chunks were loaded from disk (no intermediate stage hashes). Delete the world folder for full tracking.")
-            }
-
-            logger.info("Chunk generation forced, waiting for completion...")
         })
 
-        var tickCount = 0
+        if (!ENABLE_CHUNK_EXTRACTION) return
+
+        // Build the full list of chunk positions to generate
+        val chunkQueue = ArrayDeque<ChunkPos>()
+        for (x in -HALF_SIZE until HALF_SIZE) {
+            for (z in -HALF_SIZE until HALF_SIZE) {
+                chunkQueue.add(ChunkPos(x, z))
+            }
+        }
+        val totalChunks = chunkQueue.size
+        val chunksPerTick = 64
+
+        var generationStarted = false
+        var generationDone = false
         var chunkExtractorDone = false
+        var manuallyMarked = 0
+
         ServerTickEvents.END_SERVER_TICK.register { server ->
             if (chunkExtractorDone) return@register
 
-            tickCount++
-            if (tickCount % 100 == 0) {
-                logger.info("Waiting for chunks (${ChunkStageHashStorage.getReadyCount()}/${ChunkStageHashStorage.getTrackedCount()} ready)...")
+            // Start generation on first tick after server is ready
+            if (!generationStarted) {
+                generationStarted = true
+                logger.info("Forcing generation of $totalChunks chunks ($chunksPerTick per tick)...")
             }
 
+            // Generate a batch of chunks per tick
+            if (!generationDone) {
+                val overworld = server.overworld()
+                var generated = 0
+                while (chunkQueue.isNotEmpty() && generated < chunksPerTick) {
+                    val pos = chunkQueue.removeFirst()
+                    overworld.getChunk(pos.x, pos.z, ChunkStatus.FULL, true)
+                    generated++
+                }
+
+                val progress = totalChunks - chunkQueue.size
+                if (progress % (chunksPerTick * 10) == 0 || chunkQueue.isEmpty()) {
+                    logger.info("Chunk generation progress: $progress/$totalChunks")
+                }
+
+                if (chunkQueue.isEmpty()) {
+                    // Mark any chunks loaded from disk as ready
+                    for (x in -HALF_SIZE until HALF_SIZE) {
+                        for (z in -HALF_SIZE until HALF_SIZE) {
+                            val pos = ChunkPos(x, z)
+                            if (ChunkStageHashStorage.markReady(pos)) {
+                                manuallyMarked++
+                            }
+                        }
+                    }
+                    if (manuallyMarked > 0) {
+                        logger.warn("$manuallyMarked chunks were loaded from disk (no intermediate stage hashes). Delete the world folder for full tracking.")
+                    }
+                    generationDone = true
+                    logger.info("Chunk generation complete, waiting for all stages...")
+                }
+
+                return@register
+            }
+
+            // Wait for all chunks to finish all stages
             if (ChunkStageHashStorage.getReadyCount() >= ChunkStageHashStorage.getTrackedCount()) {
                 chunkExtractorDone = true
                 try {
@@ -169,8 +199,31 @@ object SteelExtractor : ModInitializer {
                 } catch (e: java.lang.Exception) {
                     logger.error("Extractor for \"${chunkStageExtractor.fileName()}\" failed.", e)
                 }
+                try {
+                    chunkStageExtractor.writeBinaryBlockData(outputDirectory)
+                } catch (e: java.lang.Exception) {
+                    logger.error("Binary block data extraction failed.", e)
+                }
                 logger.info("All extractors complete!")
             }
+        }
+    }
+
+    private fun runExtractor(
+        ext: Extractor,
+        outputDirectory: Path,
+        gson: com.google.gson.Gson,
+        server: MinecraftServer
+    ) {
+        try {
+            val out = outputDirectory.resolve(ext.fileName())
+            Files.createDirectories(out.parent)
+            val fileWriter = FileWriter(out.toFile(), StandardCharsets.UTF_8)
+            gson.toJson(ext.extract(server), fileWriter)
+            fileWriter.close()
+            logger.info("Wrote " + out.toAbsolutePath())
+        } catch (e: java.lang.Exception) {
+            logger.error("Extractor for \"${ext.fileName()}\" failed.", e)
         }
     }
 

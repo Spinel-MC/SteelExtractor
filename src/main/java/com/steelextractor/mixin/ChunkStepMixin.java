@@ -1,5 +1,6 @@
 package com.steelextractor.mixin;
 
+import com.steelextractor.BlockHashResult;
 import com.steelextractor.ChunkStageHashStorage;
 import net.minecraft.util.profiling.jfr.callback.ProfiledDuration;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -37,8 +38,9 @@ public class ChunkStepMixin {
 
         if (BLOCK_MODIFYING_STAGES.contains(this.targetStatus)) {
             LevelChunkSection[] sections = chunk.getSections();
-            String hash = ChunkStageHashStorage.INSTANCE.computeBlockHash(java.util.Arrays.asList(sections));
-            ChunkStageHashStorage.INSTANCE.storeHash(chunk.getPos(), this.targetStatus.toString(), hash);
+            BlockHashResult result = ChunkStageHashStorage.INSTANCE.computeBlockHashWithData(java.util.Arrays.asList(sections));
+            ChunkStageHashStorage.INSTANCE.storeHash(chunk.getPos(), this.targetStatus.toString(), result.getHash());
+            ChunkStageHashStorage.INSTANCE.storeBlockData(chunk.getPos(), this.targetStatus.toString(), result.getSectionData());
         }
 
         if (this.targetStatus == ChunkStatus.FEATURES) {
