@@ -108,6 +108,7 @@ object SteelExtractor : ModInitializer {
                 for (ext in immediateExtractors) {
                     try {
                         val out = outputDirectory.resolve(ext.fileName())
+                        Files.createDirectories(out.parent)
                         val fileWriter = FileWriter(out.toFile(), StandardCharsets.UTF_8)
                         gson.toJson(ext.extract(server), fileWriter)
                         fileWriter.close()
@@ -160,6 +161,7 @@ object SteelExtractor : ModInitializer {
                 chunkExtractorDone = true
                 try {
                     val out = outputDirectory.resolve(chunkStageExtractor.fileName())
+                    Files.createDirectories(out.parent)
                     val fileWriter = FileWriter(out.toFile(), StandardCharsets.UTF_8)
                     gson.toJson(chunkStageExtractor.extract(server), fileWriter)
                     fileWriter.close()

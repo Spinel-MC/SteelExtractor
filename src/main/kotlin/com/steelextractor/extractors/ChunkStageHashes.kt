@@ -12,7 +12,7 @@ class ChunkStageHashes : SteelExtractor.Extractor {
     private val logger = LoggerFactory.getLogger("steel-extractor-chunk-stage-hashes")
 
     override fun fileName(): String {
-        return "chunk_stage_hashes.json"
+        return "steel-core/test_assets/chunk_stage_hashes.json"
     }
 
     override fun extract(server: MinecraftServer): JsonElement {

@@ -8,7 +8,7 @@ import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.server.MinecraftServer
 class PoiTypesExtractor : SteelExtractor.Extractor {
     override fun fileName(): String {
-        return "poi_types.json"
+        return "steel-registry/build_assets/poi_types.json"
     }
 
     override fun extract(server: MinecraftServer): JsonElement {
