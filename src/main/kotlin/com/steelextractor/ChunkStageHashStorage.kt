@@ -66,7 +66,7 @@ object ChunkStageHashStorage {
                     for (z in 0 until 16) {
                         for (x in 0 until 16) {
                             val state = states.get(x, y, z)
-                            val stateId = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getId(state.block)
+                            val stateId = net.minecraft.world.level.block.Block.getId(state)
                             md.update((stateId shr 24).toByte())
                             md.update((stateId shr 16).toByte())
                             md.update((stateId shr 8).toByte())

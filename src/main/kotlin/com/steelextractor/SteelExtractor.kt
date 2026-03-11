@@ -44,7 +44,7 @@ import kotlin.system.measureTimeMillis
 
 object SteelExtractor : ModInitializer {
     private val logger = LoggerFactory.getLogger("steel-extractor")
-    private const val TRACKING_RADIUS = 5
+    private const val HALF_SIZE = 10
 
     override fun onInitialize() {
         logger.info("Hello Fabric world!")
@@ -83,10 +83,10 @@ object SteelExtractor : ModInitializer {
         val chunkStageExtractor = ChunkStageHashes()
 
         ServerLifecycleEvents.SERVER_STARTING.register { _ ->
-            logger.info("Setting up chunk stage hash tracking (radius=$TRACKING_RADIUS)")
+            logger.info("Setting up chunk stage hash tracking (${HALF_SIZE * 2}x${HALF_SIZE * 2} chunks)")
             val chunksToTrack = mutableSetOf<ChunkPos>()
-            for (x in -TRACKING_RADIUS..TRACKING_RADIUS) {
-                for (z in -TRACKING_RADIUS..TRACKING_RADIUS) {
+            for (x in -HALF_SIZE until HALF_SIZE) {
+                for (z in -HALF_SIZE until HALF_SIZE) {
                     chunksToTrack.add(ChunkPos(x, z))
                 }
             }
@@ -118,22 +118,21 @@ object SteelExtractor : ModInitializer {
                 }
             }
             logger.info("Immediate extractors done, took ${timeInMillis}ms")
-            logger.info("Forcing generation of ${(TRACKING_RADIUS * 2 + 1) * (TRACKING_RADIUS * 2 + 1)} chunks...")
+            logger.info("Forcing generation of ${HALF_SIZE * 2 * HALF_SIZE * 2} chunks...")
 
-            for (level in listOf(server.overworld(), server.getLevel(Level.NETHER), server.getLevel(Level.END))) {
-                if (level == null) continue
-                for (x in -TRACKING_RADIUS..TRACKING_RADIUS) {
-                    for (z in -TRACKING_RADIUS..TRACKING_RADIUS) {
-                        level.getChunk(x, z, ChunkStatus.FULL, true)
-                    }
+            // Only generate overworld chunks for hash comparison
+            val overworld = server.overworld()
+            for (x in -HALF_SIZE until HALF_SIZE) {
+                for (z in -HALF_SIZE until HALF_SIZE) {
+                    overworld.getChunk(x, z, ChunkStatus.FULL, true)
                 }
             }
 
             // Mark any chunks that were loaded from disk (not freshly generated)
             // as ready, since the mixin only fires during generation.
             var manuallyMarked = 0
-            for (x in -TRACKING_RADIUS..TRACKING_RADIUS) {
-                for (z in -TRACKING_RADIUS..TRACKING_RADIUS) {
+            for (x in -HALF_SIZE until HALF_SIZE) {
+                for (z in -HALF_SIZE until HALF_SIZE) {
                     val pos = ChunkPos(x, z)
                     if (ChunkStageHashStorage.markReady(pos)) {
                         manuallyMarked++
