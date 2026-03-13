@@ -21,6 +21,8 @@ import com.steelextractor.extractors.MultiNoiseBiomeParameters
 import com.steelextractor.extractors.BiomeHashes
 import com.steelextractor.extractors.ChunkStageHashes
 import com.steelextractor.extractors.Weathering
+import net.minecraft.resources.ResourceKey
+import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.level.ChunkPos
 import net.minecraft.world.level.Level
 import net.minecraft.world.level.chunk.status.ChunkStatus
@@ -86,13 +88,21 @@ object SteelExtractor : ModInitializer {
 
         val chunkStageExtractor = ChunkStageHashes()
 
+        val dimensions = listOf(
+            "minecraft:overworld" to Level.OVERWORLD,
+            "minecraft:the_nether" to Level.NETHER,
+            "minecraft:the_end" to Level.END
+        )
+
         if (ENABLE_CHUNK_EXTRACTION) {
             ServerLifecycleEvents.SERVER_STARTING.register { _ ->
-                logger.info("Setting up chunk stage hash tracking (${HALF_SIZE * 2}x${HALF_SIZE * 2} chunks)")
-                val chunksToTrack = mutableSetOf<ChunkPos>()
-                for (x in -HALF_SIZE until HALF_SIZE) {
-                    for (z in -HALF_SIZE until HALF_SIZE) {
-                        chunksToTrack.add(ChunkPos(x, z))
+                logger.info("Setting up chunk stage hash tracking (${HALF_SIZE * 2}x${HALF_SIZE * 2} chunks per dimension, ${dimensions.size} dimensions)")
+                val chunksToTrack = mutableSetOf<DimChunkPos>()
+                for ((dimId, _) in dimensions) {
+                    for (x in -HALF_SIZE until HALF_SIZE) {
+                        for (z in -HALF_SIZE until HALF_SIZE) {
+                            chunksToTrack.add(DimChunkPos(ChunkPos(x, z), dimId))
+                        }
                     }
                 }
                 ChunkStageHashStorage.startTracking(chunksToTrack)
@@ -127,18 +137,29 @@ object SteelExtractor : ModInitializer {
 
         if (!ENABLE_CHUNK_EXTRACTION) return
 
-        // Build the full list of chunk positions to generate
-        val chunkQueue = ArrayDeque<ChunkPos>()
-        for (x in -HALF_SIZE until HALF_SIZE) {
-            for (z in -HALF_SIZE until HALF_SIZE) {
-                chunkQueue.add(ChunkPos(x, z))
+        // Build per-dimension chunk queues
+        data class DimensionWork(
+            val dimensionKey: ResourceKey<Level>,
+            val dimId: String,
+            val chunkQueue: ArrayDeque<ChunkPos>
+        )
+
+        val dimWork = dimensions.map { (dimId, key) ->
+            val queue = ArrayDeque<ChunkPos>()
+            for (x in -HALF_SIZE until HALF_SIZE) {
+                for (z in -HALF_SIZE until HALF_SIZE) {
+                    queue.add(ChunkPos(x, z))
+                }
             }
+            DimensionWork(key, dimId, queue)
         }
-        val totalChunks = chunkQueue.size
+        val chunksPerDim = HALF_SIZE * 2 * HALF_SIZE * 2
+        val totalChunks = chunksPerDim * dimWork.size
         val chunksPerTick = 64
 
         var generationStarted = false
-        var generationDone = false
+        var currentDimIdx = 0
+        var allGenerationDone = false
         var chunkExtractorDone = false
         var manuallyMarked = 0
 
@@ -148,39 +169,52 @@ object SteelExtractor : ModInitializer {
             // Start generation on first tick after server is ready
             if (!generationStarted) {
                 generationStarted = true
-                logger.info("Forcing generation of $totalChunks chunks ($chunksPerTick per tick)...")
+                logger.info("Forcing generation of $totalChunks chunks across ${dimWork.size} dimensions ($chunksPerTick per tick)...")
             }
 
-            // Generate a batch of chunks per tick
-            if (!generationDone) {
-                val overworld = server.overworld()
+            // Generate a batch of chunks per tick, one dimension at a time
+            if (!allGenerationDone) {
+                val dim = dimWork[currentDimIdx]
+                ChunkStageHashStorage.currentDimension = dim.dimId
+                val level: ServerLevel = server.getLevel(dim.dimensionKey) ?: run {
+                    logger.warn("Could not get level for ${dim.dimId}, skipping")
+                    currentDimIdx++
+                    if (currentDimIdx >= dimWork.size) allGenerationDone = true
+                    return@register
+                }
+
                 var generated = 0
-                while (chunkQueue.isNotEmpty() && generated < chunksPerTick) {
-                    val pos = chunkQueue.removeFirst()
-                    overworld.getChunk(pos.x, pos.z, ChunkStatus.FULL, true)
+                while (dim.chunkQueue.isNotEmpty() && generated < chunksPerTick) {
+                    val pos = dim.chunkQueue.removeFirst()
+                    level.getChunk(pos.x, pos.z, ChunkStatus.FULL, true)
                     generated++
                 }
 
-                val progress = totalChunks - chunkQueue.size
-                if (progress % (chunksPerTick * 10) == 0 || chunkQueue.isEmpty()) {
-                    logger.info("Chunk generation progress: $progress/$totalChunks")
+                val dimProgress = chunksPerDim - dim.chunkQueue.size
+                val overallProgress = currentDimIdx * chunksPerDim + dimProgress
+                if (dimProgress % (chunksPerTick * 10) == 0 || dim.chunkQueue.isEmpty()) {
+                    logger.info("Chunk generation progress: $overallProgress/$totalChunks (${dim.dimId}: $dimProgress/$chunksPerDim)")
                 }
 
-                if (chunkQueue.isEmpty()) {
+                if (dim.chunkQueue.isEmpty()) {
                     // Mark any chunks loaded from disk as ready
                     for (x in -HALF_SIZE until HALF_SIZE) {
                         for (z in -HALF_SIZE until HALF_SIZE) {
                             val pos = ChunkPos(x, z)
-                            if (ChunkStageHashStorage.markReady(pos)) {
+                            if (ChunkStageHashStorage.markReady(pos, dim.dimId)) {
                                 manuallyMarked++
                             }
                         }
                     }
-                    if (manuallyMarked > 0) {
-                        logger.warn("$manuallyMarked chunks were loaded from disk (no intermediate stage hashes). Delete the world folder for full tracking.")
+                    logger.info("Finished generating chunks for ${dim.dimId}")
+                    currentDimIdx++
+                    if (currentDimIdx >= dimWork.size) {
+                        if (manuallyMarked > 0) {
+                            logger.warn("$manuallyMarked chunks were loaded from disk (no intermediate stage hashes). Delete the world folder for full tracking.")
+                        }
+                        allGenerationDone = true
+                        logger.info("All chunk generation complete, waiting for all stages...")
                     }
-                    generationDone = true
-                    logger.info("Chunk generation complete, waiting for all stages...")
                 }
 
                 return@register

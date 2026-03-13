@@ -30,34 +30,43 @@ class ChunkStageHashes : SteelExtractor.Extractor {
         }
 
         val allHashes = ChunkStageHashStorage.getAllHashes()
-        val chunkGroups = allHashes.entries.groupBy { it.key.first }
 
-        val chunksArray = JsonArray()
+        val dimensionsJson = JsonObject()
+        val dimGroups = allHashes.entries.groupBy { it.key.first.dimension }
 
-        for ((pos, entries) in chunkGroups.toSortedMap(compareBy({ it.x }, { it.z }))) {
-            val chunkJson = JsonObject()
-            chunkJson.addProperty("x", pos.x)
-            chunkJson.addProperty("z", pos.z)
+        for ((dimension, dimEntries) in dimGroups.toSortedMap()) {
+            val dimJson = JsonObject()
+            val chunkGroups = dimEntries.groupBy { it.key.first.pos }
 
-            val stagesJson = JsonObject()
-            for ((key, hash) in entries.sortedBy { it.key.second }) {
-                val stageName = key.second
-                stagesJson.addProperty(stageName, hash)
+            val chunksArray = JsonArray()
+            for ((pos, entries) in chunkGroups.toSortedMap(compareBy({ it.x }, { it.z }))) {
+                val chunkJson = JsonObject()
+                chunkJson.addProperty("x", pos.x)
+                chunkJson.addProperty("z", pos.z)
+
+                val stagesJson = JsonObject()
+                for ((key, hash) in entries.sortedBy { it.key.second }) {
+                    val stageName = key.second
+                    stagesJson.addProperty(stageName, hash)
+                }
+                chunkJson.add("stages", stagesJson)
+
+                chunksArray.add(chunkJson)
             }
-            chunkJson.add("stages", stagesJson)
 
-            chunksArray.add(chunkJson)
+            dimJson.add("chunks", chunksArray)
+            dimJson.addProperty("chunk_count", chunkGroups.size)
+            dimensionsJson.add(dimension, dimJson)
+
+            logger.info("Extracted chunk stage hashes for ${chunkGroups.size} chunks in $dimension")
         }
 
-        json.add("chunks", chunksArray)
-        json.addProperty("chunk_count", chunkGroups.size)
-
-        logger.info("Extracted chunk stage hashes for ${chunkGroups.size} chunks")
+        json.add("dimensions", dimensionsJson)
         return json
     }
 
     /**
-     * Write per-stage gzip-compressed binary files containing raw block state IDs.
+     * Write per-dimension per-stage gzip-compressed binary files containing raw block state IDs.
      *
      * Format (all integers big-endian):
      *   chunk_count: i32
@@ -77,40 +86,45 @@ class ChunkStageHashes : SteelExtractor.Extractor {
             return
         }
 
-        val stageGroups = allData.entries.groupBy { it.key.second }
+        val dimGroups = allData.entries.groupBy { it.key.first.dimension }
 
-        for ((stageName, entries) in stageGroups) {
-            val shortName = stageName.removePrefix("minecraft:")
-            val fileName = "chunk_stage_${shortName}_blocks.bin.gz"
-            val outputPath = outputDir.resolve("steel-core/test_assets/$fileName")
-            Files.createDirectories(outputPath.parent)
+        for ((dimension, dimEntries) in dimGroups) {
+            val dimShort = dimension.removePrefix("minecraft:")
+            val stageGroups = dimEntries.groupBy { it.key.second }
 
-            val chunksByPos = entries
-                .map { it.key.first to it.value }
-                .sortedWith(compareBy({ it.first.x }, { it.first.z }))
+            for ((stageName, entries) in stageGroups) {
+                val shortName = stageName.removePrefix("minecraft:")
+                val fileName = "chunk_stage_${dimShort}_${shortName}_blocks.bin.gz"
+                val outputPath = outputDir.resolve("steel-core/test_assets/$fileName")
+                Files.createDirectories(outputPath.parent)
 
-            GZIPOutputStream(Files.newOutputStream(outputPath)).use { gzip ->
-                DataOutputStream(gzip).use { dos ->
-                    dos.writeInt(chunksByPos.size)
-                    for ((pos, sectionData) in chunksByPos) {
-                        dos.writeInt(pos.x)
-                        dos.writeInt(pos.z)
-                        dos.writeInt(sectionData.size)
-                        for (section in sectionData) {
-                            if (section == null) {
-                                dos.writeByte(0)
-                            } else {
-                                dos.writeByte(1)
-                                for (stateId in section) {
-                                    dos.writeInt(stateId)
+                val chunksByPos = entries
+                    .map { it.key.first.pos to it.value }
+                    .sortedWith(compareBy({ it.first.x }, { it.first.z }))
+
+                GZIPOutputStream(Files.newOutputStream(outputPath)).use { gzip ->
+                    DataOutputStream(gzip).use { dos ->
+                        dos.writeInt(chunksByPos.size)
+                        for ((pos, sectionData) in chunksByPos) {
+                            dos.writeInt(pos.x)
+                            dos.writeInt(pos.z)
+                            dos.writeInt(sectionData.size)
+                            for (section in sectionData) {
+                                if (section == null) {
+                                    dos.writeByte(0)
+                                } else {
+                                    dos.writeByte(1)
+                                    for (stateId in section) {
+                                        dos.writeInt(stateId)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            logger.info("Wrote binary block data for stage '$stageName': ${chunksByPos.size} chunks -> $outputPath")
+                logger.info("Wrote binary block data for $dimension stage '$stageName': ${chunksByPos.size} chunks -> $outputPath")
+            }
         }
     }
 }

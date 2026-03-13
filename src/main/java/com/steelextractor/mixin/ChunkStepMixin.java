@@ -32,19 +32,21 @@ public class ChunkStepMixin {
 
     @Inject(method = "completeChunkGeneration", at = @At("RETURN"))
     private void onChunkGenerationComplete(ChunkAccess chunk, ProfiledDuration profiledDuration, CallbackInfoReturnable<ChunkAccess> cir) {
-        if (!ChunkStageHashStorage.INSTANCE.isTracking(chunk.getPos())) {
+        String dimension = ChunkStageHashStorage.INSTANCE.getCurrentDimension();
+
+        if (!ChunkStageHashStorage.INSTANCE.isTracking(chunk.getPos(), dimension)) {
             return;
         }
 
         if (BLOCK_MODIFYING_STAGES.contains(this.targetStatus)) {
             LevelChunkSection[] sections = chunk.getSections();
             BlockHashResult result = ChunkStageHashStorage.INSTANCE.computeBlockHashWithData(java.util.Arrays.asList(sections));
-            ChunkStageHashStorage.INSTANCE.storeHash(chunk.getPos(), this.targetStatus.toString(), result.getHash());
-            ChunkStageHashStorage.INSTANCE.storeBlockData(chunk.getPos(), this.targetStatus.toString(), result.getSectionData());
+            ChunkStageHashStorage.INSTANCE.storeHash(chunk.getPos(), dimension, this.targetStatus.toString(), result.getHash());
+            ChunkStageHashStorage.INSTANCE.storeBlockData(chunk.getPos(), dimension, this.targetStatus.toString(), result.getSectionData());
         }
 
         if (this.targetStatus == ChunkStatus.FEATURES) {
-            ChunkStageHashStorage.INSTANCE.markReady(chunk.getPos());
+            ChunkStageHashStorage.INSTANCE.markReady(chunk.getPos(), dimension);
         }
     }
 }
