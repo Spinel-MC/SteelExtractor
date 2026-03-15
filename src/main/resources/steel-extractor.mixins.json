@@ -3,7 +3,8 @@
 	"package": "com.steelextractor.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
-		"ExampleMixin"
+		"ExampleMixin",
+		"ChunkStepMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

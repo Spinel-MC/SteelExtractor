@@ -1,26 +1,23 @@
 package com.steelextractor.extractors
 
-import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.steelextractor.SteelExtractor
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.server.MinecraftServer
+import net.minecraft.world.level.block.WeatheringCopper
 
-class BlockEntities : SteelExtractor.Extractor {
+class Weathering : SteelExtractor.Extractor {
     override fun fileName(): String {
-        return "steel-registry/build_assets/block_entities.json"
+        return "steel-core/build/weathering.json"
     }
 
     override fun extract(server: MinecraftServer): JsonElement {
         val topLevelJson = JsonObject()
 
-        val blockEntitiesJson = JsonArray()
-        for (blockEntity in BuiltInRegistries.BLOCK_ENTITY_TYPE) {
-            blockEntitiesJson.add(BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntity)!!.path)
+        for ((from, to) in WeatheringCopper.NEXT_BY_BLOCK.get()) {
+            topLevelJson.addProperty(BuiltInRegistries.BLOCK.getKey(from).path, BuiltInRegistries.BLOCK.getKey(to).path)
         }
-
-        topLevelJson.add("block_entity_types", blockEntitiesJson)
 
         return topLevelJson
     }
