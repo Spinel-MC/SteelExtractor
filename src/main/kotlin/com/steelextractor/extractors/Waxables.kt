@@ -9,14 +9,17 @@ import net.minecraft.world.item.HoneycombItem
 
 class Waxables : SteelExtractor.Extractor {
     override fun fileName(): String {
-        return "waxables.json"
+        return "steel-core/build/waxables.json"
     }
 
     override fun extract(server: MinecraftServer): JsonElement {
         val topLevelJson = JsonObject()
 
         for ((normal, waxed) in HoneycombItem.WAXABLES.get()) {
-            topLevelJson.addProperty(BuiltInRegistries.BLOCK.getKey(normal).path, BuiltInRegistries.BLOCK.getKey(waxed).path)
+            topLevelJson.addProperty(
+                BuiltInRegistries.BLOCK.getKey(normal).path,
+                BuiltInRegistries.BLOCK.getKey(waxed).path
+            )
         }
 
         return topLevelJson
