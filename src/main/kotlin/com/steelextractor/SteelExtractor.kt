@@ -51,7 +51,7 @@ object SteelExtractor : ModInitializer {
     private val logger = LoggerFactory.getLogger("steel-extractor")
 
     /** Set to false to skip chunk generation and chunk stage hash extraction. */
-    private const val ENABLE_CHUNK_EXTRACTION = false
+    private const val ENABLE_CHUNK_EXTRACTION = true
 
     /** Set to false to skip storing per-chunk block data in memory and writing binary dump files. */
     private const val ENABLE_BINARY_DUMP = false
