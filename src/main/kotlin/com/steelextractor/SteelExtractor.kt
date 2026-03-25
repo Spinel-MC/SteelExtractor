@@ -54,14 +54,30 @@ object SteelExtractor : ModInitializer {
     private const val ENABLE_CHUNK_EXTRACTION = true
 
     /** Set to false to skip storing per-chunk block data in memory and writing binary dump files. */
-    private const val ENABLE_BINARY_DUMP = false
+    private const val ENABLE_BINARY_DUMP = true
 
     /** Sampling parameters: place random CLUSTER_SIZE x CLUSTER_SIZE clusters within a SAMPLE_HALF_RANGE*2 x SAMPLE_HALF_RANGE*2 area. */
-    const val CHUNK_SAMPLE_SEED: Long = 13580
-    private const val CLUSTER_SIZE: Int = 20 // 20x20 chunks per cluster
-    private const val NUM_CLUSTERS: Int = 25 // 25 clusters * 400 = 10,000 chunks
+    const val CHUNK_SAMPLE_SEED: Long = 123456
+    private const val CLUSTER_SIZE: Int = 10 // 10x10 chunks per cluster
+    private const val NUM_CLUSTERS: Int = 25 // 25 clusters * 100 = 2,500 chunks
     const val NUM_SAMPLE_CHUNKS: Int = NUM_CLUSTERS * CLUSTER_SIZE * CLUSTER_SIZE
-    private const val SAMPLE_HALF_RANGE: Int = 50_000 // 100,000x100,000 chunk area
+    private const val SAMPLE_HALF_RANGE: Int = 500_000 // 1000,000x1000,000 chunk area
+
+    /** Generate the same sampled chunk positions used by chunk stage hash extraction. */
+    fun sampledChunkPositions(): List<ChunkPos> {
+        val rng = Random(CHUNK_SAMPLE_SEED)
+        val positions = mutableListOf<ChunkPos>()
+        for (i in 0 until NUM_CLUSTERS) {
+            val originX = rng.nextInt(-SAMPLE_HALF_RANGE, SAMPLE_HALF_RANGE)
+            val originZ = rng.nextInt(-SAMPLE_HALF_RANGE, SAMPLE_HALF_RANGE)
+            for (dx in 0 until CLUSTER_SIZE) {
+                for (dz in 0 until CLUSTER_SIZE) {
+                    positions.add(ChunkPos(originX + dx, originZ + dz))
+                }
+            }
+        }
+        return positions
+    }
 
     override fun onInitialize() {
         logger.info("Hello Fabric world!")
@@ -108,21 +124,7 @@ object SteelExtractor : ModInitializer {
             "minecraft:the_end" to Level.END
         )
 
-        // Pre-compute sampled chunk positions: random cluster origins, each expanded to CLUSTER_SIZE x CLUSTER_SIZE
-        val sampledPositions = run {
-            val rng = Random(CHUNK_SAMPLE_SEED)
-            val positions = mutableListOf<ChunkPos>()
-            for (i in 0 until NUM_CLUSTERS) {
-                val originX = rng.nextInt(-SAMPLE_HALF_RANGE, SAMPLE_HALF_RANGE)
-                val originZ = rng.nextInt(-SAMPLE_HALF_RANGE, SAMPLE_HALF_RANGE)
-                for (dx in 0 until CLUSTER_SIZE) {
-                    for (dz in 0 until CLUSTER_SIZE) {
-                        positions.add(ChunkPos(originX + dx, originZ + dz))
-                    }
-                }
-            }
-            positions
-        }
+        val sampledPositions = sampledChunkPositions()
 
         if (ENABLE_CHUNK_EXTRACTION) {
             ServerLifecycleEvents.SERVER_STARTING.register { _ ->

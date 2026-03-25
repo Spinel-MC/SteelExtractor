@@ -12,16 +12,12 @@ import net.minecraft.world.level.levelgen.NoiseBasedChunkGenerator
 import net.minecraft.world.level.levelgen.RandomState
 import org.slf4j.LoggerFactory
 import java.security.MessageDigest
-import kotlin.random.Random
 
 class BiomeHashes : SteelExtractor.Extractor {
     private val logger = LoggerFactory.getLogger("steel-extractor-biome-hashes")
 
     companion object {
         const val SEED: Long = 13579
-        private const val CHUNK_SAMPLE_SEED: Long = 24680
-        private const val NUM_CHUNKS: Int = 128
-        private const val HALF_RANGE: Int = 625 // 10000 / 16 = 625 chunks per axis half
     }
 
     override fun fileName(): String {
@@ -33,8 +29,8 @@ class BiomeHashes : SteelExtractor.Extractor {
     override fun extract(server: MinecraftServer): JsonElement {
         val json = JsonObject()
         json.addProperty("seed", SEED)
-        json.addProperty("chunk_sample_seed", CHUNK_SAMPLE_SEED)
-        json.addProperty("num_chunks", NUM_CHUNKS)
+        json.addProperty("chunk_sample_seed", SteelExtractor.CHUNK_SAMPLE_SEED)
+        json.addProperty("num_chunks", SteelExtractor.NUM_SAMPLE_CHUNKS)
 
         val worldSeed = server.overworld().seed
         if (worldSeed != SEED) {
@@ -83,22 +79,20 @@ class BiomeHashes : SteelExtractor.Extractor {
 
         val hashesArray = JsonArray()
 
-        val rng = Random(CHUNK_SAMPLE_SEED)
-        for (i in 0 until NUM_CHUNKS) {
-            val chunkX = rng.nextInt(-HALF_RANGE, HALF_RANGE)
-            val chunkZ = rng.nextInt(-HALF_RANGE, HALF_RANGE)
-            val hash = chunkBiomeHash(climateSampler, biomeSource, chunkX, chunkZ, minSectionY, maxSectionY)
+        val sampledPositions = SteelExtractor.sampledChunkPositions()
+        for (pos in sampledPositions) {
+            val hash = chunkBiomeHash(climateSampler, biomeSource, pos.x, pos.z, minSectionY, maxSectionY)
 
             val entry = JsonArray()
-            entry.add(chunkX)
-            entry.add(chunkZ)
+            entry.add(pos.x)
+            entry.add(pos.z)
             entry.add(hash)
             hashesArray.add(entry)
         }
 
         dimJson.add("hashes", hashesArray)
 
-        logger.info("Extracted biome hashes for $name: ${hashesArray.size()} chunks (seed=$SEED, sampleSeed=$CHUNK_SAMPLE_SEED)")
+        logger.info("Extracted biome hashes for $name: ${hashesArray.size()} chunks (seed=$SEED, sampleSeed=${SteelExtractor.CHUNK_SAMPLE_SEED})")
         return dimJson
     }
 
