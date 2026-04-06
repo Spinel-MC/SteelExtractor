@@ -44,6 +44,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import kotlin.concurrent.thread
 import kotlin.random.Random
 import kotlin.system.measureTimeMillis
 
@@ -258,13 +259,21 @@ object SteelExtractor : ModInitializer {
                     logger.error("Extractor for \"${chunkStageExtractor.fileName()}\" failed.", e)
                 }
                 if (ENABLE_BINARY_DUMP) {
-                    try {
-                        chunkStageExtractor.writeBinaryBlockData(outputDirectory)
-                    } catch (e: java.lang.Exception) {
-                        logger.error("Binary block data extraction failed.", e)
+                    thread(name = "BinaryDumpThread") {
+                        try {
+                            logger.info("Starting background binary block data extraction...")
+                            val time = measureTimeMillis {
+                                chunkStageExtractor.writeBinaryBlockData(outputDirectory)
+                            }
+                            logger.info("Background binary block data extraction complete (took ${time}ms)!")
+                            logger.info("All extractors complete!")
+                        } catch (e: Exception) {
+                            logger.error("Binary block data extraction failed.", e)
+                        }
                     }
+                } else {
+                    logger.info("All extractors complete! (binary dump disabled)")
                 }
-                logger.info("All extractors complete!")
             }
         }
     }
