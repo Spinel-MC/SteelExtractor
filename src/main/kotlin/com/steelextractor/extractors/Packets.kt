@@ -5,9 +5,9 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.steelextractor.SteelExtractor
 import net.minecraft.SharedConstants
-import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.ConnectionProtocol
 import net.minecraft.network.ProtocolInfo
+import net.minecraft.network.protocol.Packet
 import net.minecraft.network.protocol.PacketType
 import net.minecraft.network.protocol.configuration.ConfigurationProtocols
 import net.minecraft.network.protocol.game.GameProtocols
@@ -120,13 +120,13 @@ class Packets : SteelExtractor.Extractor {
         val obj = JsonObject()
         obj.addProperty("id", String.format("0x%02X", id))
         
-        var packetClass = packetClasses[type]
-        if (packetClass == null) {
-            packetClass = guessPacketClass(type, direction, protocol)
+        var clazz = packetClasses[type]
+        if (clazz == null) {
+            clazz = guessPacketClass(type, direction, protocol)
         }
 
-        if (packetClass != null) {
-            obj.add("fields", extractFields(packetClass))
+        if (clazz != null) {
+            obj.add("fields", extractFields(clazz))
         } else {
             logger.warn("Could not find class for packet ${type.id()} ($direction, $protocol)")
         }
@@ -163,18 +163,18 @@ class Packets : SteelExtractor.Extractor {
         return null
     }
 
-    private fun extractFields(packetClass: Class<*>): JsonArray {
+    private fun extractFields(clazz: Class<*>): JsonArray {
         val fields = JsonArray()
         
-        if (packetClass.isRecord) {
-            for (comp in packetClass.recordComponents) {
+        if (clazz.isRecord) {
+            for (comp in clazz.recordComponents) {
                 val fieldObj = JsonObject()
                 fieldObj.addProperty("name", camelToSnake(comp.name))
                 fieldObj.addProperty("type", mapType(comp.genericType))
                 fields.add(fieldObj)
             }
         } else {
-            for (field in packetClass.declaredFields) {
+            for (field in clazz.declaredFields) {
                 if (Modifier.isStatic(field.modifiers) || Modifier.isTransient(field.modifiers)) continue
                 if (field.isSynthetic) continue
                 
@@ -250,10 +250,13 @@ class Packets : SteelExtractor.Extractor {
             "net.minecraft.network.protocol.ping.PingProtocols"
         )
         
+        logger.info("Starting packet class-to-type mapping scan...")
+        var foundCount = 0
+        
         for (containerName in containers) {
             try {
-                val containerClass = Class.forName(containerName)
-                for (field in containerClass.declaredFields) {
+                val clazz = Class.forName(containerName)
+                for (field in clazz.declaredFields) {
                     if (Modifier.isStatic(field.modifiers) && PacketType::class.java.isAssignableFrom(field.type)) {
                         field.isAccessible = true
                         val packetType = field.get(null) as? PacketType<*>
@@ -263,14 +266,18 @@ class Packets : SteelExtractor.Extractor {
                                 val packetClass = genericType.actualTypeArguments[0] as? Class<*>
                                 if (packetClass != null) {
                                     map[packetType] = packetClass
+                                    foundCount++
                                 }
                             }
                         }
                     }
                 }
             } catch (e: Exception) {
+                logger.warn("Failed to scan packet container $containerName: ${e.message}")
             }
         }
+        
+        logger.info("Found $foundCount packet mappings from protocol containers.")
         return map
     }
 }
